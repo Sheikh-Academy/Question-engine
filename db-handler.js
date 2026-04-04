@@ -1,7 +1,7 @@
 /**
- * IndexedDB Handler for Sheikh Academy
- * Features: Auto-save drafts, local caching of 15,000+ questions, and recovery.
- * [পয়েন্ট ৮, ৯ - ইনডেক্সডডিবি সেটআপ ও ড্রাফট সেভ]
+ * Sheikh Academy - Master Data & IndexedDB Handler
+ * Features: Centralized JSON management, Auto-save drafts, 15k+ Question Caching.
+ * [পয়েন্ট ৮, ৯ - ডাটা সোর্স ও ইনডেক্সডডিবি সেটআপ]
  */
 
 const DBHandler = {
@@ -9,8 +9,38 @@ const DBHandler = {
     version: 1,
     db: null,
 
+    // ১. জেসন ডাটা কনফিগারেশন (সরাসরি হ্যান্ডলারের ভেতর)
+    config: {
+        basePath: './data/questions/',
+        sources: {
+            'physics': {
+                'mcq': 'physics_mcq_15k.json',
+                'creative': 'physics_cq.json'
+            },
+            'chemistry': {
+                'mcq': 'chemistry_mcq_all.json',
+                'creative': 'chemistry_cq.json'
+            },
+            'biology': {
+                'mcq': 'biology_mcq_v1.json',
+                'creative': 'biology_cq_v1.json'
+            },
+            'math': {
+                'mcq': 'higher_math_mcq.json',
+                'creative': 'higher_math_cq.json'
+            },
+            'ict': {
+                'mcq': 'ict_mcq_bank.json'
+            },
+            'english': {
+                'grammar': 'english_grammar_rules.json'
+            }
+            // নতুন জেসন ফাইল এখানে যোগ করবেন
+        }
+    },
+
     /**
-     * ডাটাবেস ইনিশিয়ালাইজ করা
+     * ডাটাবেস ইনিশিয়ালাইজ করা
      */
     init: function() {
         return new Promise((resolve, reject) => {
@@ -18,13 +48,13 @@ const DBHandler = {
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                // ১. প্রশ্নের ডাটা ক্যাশ করার জন্য স্টোর
+                // প্রশ্নের ডাটা স্টোর (Key হিসেবে SL ব্যবহার করা হয়েছে আপনার রিকোয়ারমেন্ট অনুযায়ী)
                 if (!db.objectStoreNames.contains('questions')) {
                     db.createObjectStore('questions', { keyPath: 'SL' });
                 }
-                // ২. শিক্ষকদের ড্রাফট বা অসম্পূর্ণ কাজ সেভ করার জন্য স্টোর
+                // ড্রাফট সেভ করার স্টোর
                 if (!db.objectStoreNames.contains('drafts')) {
-                    db.createObjectStore('drafts', { keyPath: 'id', autoIncrement: true });
+                    db.createObjectStore('drafts', { keyPath: 'id' });
                 }
             };
 
@@ -38,8 +68,45 @@ const DBHandler = {
     },
 
     /**
-     * ড্রাফট সেভ করা (পয়েন্ট ৯ - পরে এসে সেখান থেকে শুরু করা)
-     * @param {Object} content - পুরো এডিটর বা প্রশ্নপত্রের বর্তমান অবস্থা
+     * নির্দিষ্ট বিষয় ও টাইপ অনুযায়ী ডাটা সিঙ্ক করা
+     */
+    async syncQuestions(subject, type) {
+        const file = this.config.sources[subject] ? this.config.sources[subject][type] : null;
+        if (!file) {
+            console.error("ফাইল কনফিগারেশনে পাওয়া যায়নি!");
+            return;
+        }
+
+        const url = this.config.basePath + file;
+        try {
+            const response = await fetch(url);
+            const questions = await response.json();
+            await this.cacheQuestions(questions);
+            return questions;
+        } catch (error) {
+            console.error("ডাটা লোড করতে সমস্যা হয়েছে:", error);
+        }
+    },
+
+    /**
+     * জেসন থেকে আসা প্রশ্নগুলো লোকাল ডিবিতে সেভ করা
+     */
+    cacheQuestions: async function(questionList) {
+        if (!this.db) await this.init();
+        const transaction = this.db.transaction(['questions'], 'readwrite');
+        const store = transaction.objectStore('questions');
+        
+        questionList.forEach(q => store.put(q));
+        return new Promise((resolve) => {
+            transaction.oncomplete = () => {
+                console.log("সব প্রশ্ন লোকাল স্টোরেজে সংরক্ষিত হয়েছে।");
+                resolve();
+            };
+        });
+    },
+
+    /**
+     * ড্রাফট সেভ করা (পয়েন্ট ৯)
      */
     saveDraft: async function(content) {
         if (!this.db) await this.init();
@@ -47,7 +114,7 @@ const DBHandler = {
         const store = transaction.objectStore('drafts');
         
         const draftData = {
-            id: 'current_work', // একটি নির্দিষ্ট কি (Key) ব্যবহার করা যেন বারবার ওভাররাইট হয়
+            id: 'current_work',
             data: content,
             timestamp: new Date().getTime()
         };
@@ -56,7 +123,7 @@ const DBHandler = {
     },
 
     /**
-     * সংরক্ষিত ড্রাফট ফিরে পাওয়া (পয়েন্ট ৯)
+     * ড্রাফট লোড করা
      */
     loadDraft: async function() {
         if (!this.db) await this.init();
@@ -70,20 +137,7 @@ const DBHandler = {
     },
 
     /**
-     * বিশাল জেসন ডাটা লোকালি লোড করে রাখা (পয়েন্ট ৮)
-     * @param {Array} questionList - জেসন থেকে আসা ১৫,০০০ প্রশ্ন
-     */
-    cacheQuestions: async function(questionList) {
-        if (!this.db) await this.init();
-        const transaction = this.db.transaction(['questions'], 'readwrite');
-        const store = transaction.objectStore('questions');
-        
-        questionList.forEach(q => store.put(q));
-        console.log("সব প্রশ্ন লোকাল স্টোরেজে সেভ হয়েছে।");
-    },
-
-    /**
-     * লোকাল স্টোরেজ থেকে প্রশ্ন রিড করা
+     * সব প্রশ্ন রিড করা
      */
     getAllQuestions: async function() {
         if (!this.db) await this.init();
