@@ -36,19 +36,32 @@ const DBHandler = {
      * input: class-7-math + mcq
      * output: class-7/mcq/math.json
      */
-    getFileUrl: function(subject, type) {
+    getFileUrl: function(subjectKey, type) {
+    /**
+     * subjectKey: "class-8-ict" অথবা "class-9-10-physics"
+     * type: "mcq" অথবা "creative"
+     */
+    if (!subjectKey || !type) return null;
 
-        if (!subject || !type) return null;
+    const parts = subjectKey.split("-");
+    let className, subName;
 
-        const parts = subject.split("-");
+    // ১. ফোল্ডার নাম বের করার লজিক (class-9-10 এবং class-11-12 এর জন্য)
+    if (subjectKey.includes("9-10") || subjectKey.includes("11-12")) {
+        // class-9-10 এর ক্ষেত্রে প্রথম ৩টি অংশ মিলে ফোল্ডার নাম (class, 9, 10)
+        className = parts.slice(0, 3).join("-"); // ফলাফল: class-9-10
+        subName = parts.slice(3).join("-");      // ফলাফল: physics
+    } else {
+        // সাধারণ ক্লাসের জন্য (class-8, class-7 ইত্যাদি)
+        className = parts.slice(0, 2).join("-"); // ফলাফল: class-8
+        subName = parts.slice(2).join("-");      // ফলাফল: ict
+    }
 
-        if (parts.length < 3) return null;
+    if (!subName) return null;
 
-        const className = parts[0] + "-" + parts[1]; // class-7
-        const subName = parts.slice(2).join("-");   // math / bangla-1st
-
-        return `${this.config.basePath}${className}/${type}/${subName}.json`;
-    },
+    // ২. গিটহাবের লিঙ্কের সাথে মিলিয়ে URL রিটার্ন করা
+    return `${this.config.basePath}${className}/${type}/${subName}.json`;
+},
 
     /**
      * 📦 IndexedDB init
