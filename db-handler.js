@@ -8,66 +8,63 @@ const DBHandler = {
     version: 1,
     db: null,
 
-    // ১. ডাটা কনফিগারেশন
+    // ================= CONFIG =================
     config: {
-        // গিটহাবের র (Raw) কন্টেন্ট ইউআরএল বেস হিসেবে ব্যবহার করুন
-        // উদাহরণ: 'https://raw.githubusercontent.com/[Username]/[Repo]/[Branch]/[Folder]/'
-        basePath: 'https://raw.githubusercontent.com/your-username/sheikh-academy-data/main/questions/',
+        basePath: 'https://raw.githubusercontent.com/Sheikh-Academy/json-file-for-cq-and-mcq-for-all-class/refs/heads/main/',
 
         sources: {
-            'physics': {
-                'mcq': 'physics_mcq_15k.json', // পূর্ণ পথ হবে: basePath + filename
-                'creative': 'physics_cq.json'
-            },
-            'chemistry': {
-                'mcq': 'chemistry_mcq_all.json',
-                'creative': 'chemistry_cq.json'
-            },
-            'biology': {
-                'mcq': 'biology_mcq_v1.json',
-                'creative': 'biology_cq_v1.json'
-            },
-            'math': {
-                'mcq': 'higher_math_mcq.json',
-                'creative': 'higher_math_cq.json'
-            },
-            'ict': {
-                'mcq': 'ict_mcq_bank.json'
-            },
-            'english': {
-                'grammar': 'english_grammar_rules.json'
-            },
-            'biology': {
-                // আপনি চাইলে নির্দিষ্ট ফাইলের জন্য পুরো গিটহাব লিঙ্কও সরাসরি দিতে পারেন
-                'mcq': 'https://raw.githubusercontent.com/user/repo/main/bio_mcq.json'
+            "class-4": ["bangla", "english", "math", "science"],
+            "class-5": ["bangla", "english", "math", "science"],
+            "class-6": ["bangla-1st", "bangla-2nd", "english-1st", "english-2nd", "math", "bangladesh-and-global-studies", "islam", "agriculture", "science", "ict"],
+            "class-7": ["bangla-1st", "bangla-2nd", "english-1st", "english-2nd", "math", "bangladesh-and-global-studies", "islam", "agriculture", "science", "ict"],
+            "class-8": ["bangla-1st", "bangla-2nd", "english-1st", "english-2nd", "math", "bangladesh-and-global-studies", "islam", "agriculture", "science", "ict"],
+            "class-9-10": ["bangla-1st", "bangla-2nd", "english-1st", "english-2nd", "math", "islam", "agriculture", "science", "ict", "physics", "chemistry", "biology", "bangladesh-and-global-studies", "civivcs", "history", "gekography", "accounting", "business-management", "bangking-and-finanace"],
+            "class-11-12": ["bangla-1st", "bangla-2nd", "english-1st", "english-2nd", "math", "islam", "agriculture", "science", "ict", "physics", "chemistry", "biology", "bangladesh-and-global-studies", "civivcs", "history", "gekography", "accounting", "business-management", "bangking-and-finanace"]
             }
-            // এভাবেই ১৫টি বা তার বেশি লিঙ্ক এখানে যোগ করবেন
-        }
     },
 
     /**
-     * সঠিক ইউআরএল তৈরি করার ফাংশন
+     * 🔑 class + subject → key বানানোর helper
+     * example: class-7 + math → class-7-math
+     */
+    makeKey: function(className, subject) {
+        return `${className}-${subject}`;
+    },
+
+    /**
+     * 🔗 URL তৈরি করার ফাংশন
+     * input: class-7-math + mcq
+     * output: class-7/mcq/math.json
      */
     getFileUrl: function(subject, type) {
-        const file = this.config.sources[subject] ? this.config.sources[subject][type] : null;
-        if (!file) return null;
 
-        // যদি ফাইলটি 'http' দিয়ে শুরু হয় তবে সেটি সরাসরি রিটার্ন করবে, নতুবা basePath যোগ করবে
-        return file.startsWith('http') ? file : this.config.basePath + file;
+        if (!subject || !type) return null;
+
+        const parts = subject.split("-");
+
+        if (parts.length < 3) return null;
+
+        const className = parts[0] + "-" + parts[1]; // class-7
+        const subName = parts.slice(2).join("-");   // math / bangla-1st
+
+        return `${this.config.basePath}${className}/${type}/${subName}.json`;
     },
 
     /**
-     * ডাটাবেস ইনিশিয়ালাইজেশন
+     * 📦 IndexedDB init
      */
     init: function() {
         return new Promise((resolve, reject) => {
+
             const request = indexedDB.open(this.dbName, this.version);
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+
                 if (!db.objectStoreNames.contains('questions')) {
                     db.createObjectStore('questions', { keyPath: 'SL' });
                 }
+
                 if (!db.objectStoreNames.contains('drafts')) {
                     db.createObjectStore('drafts', { keyPath: 'id' });
                 }
@@ -83,10 +80,14 @@ const DBHandler = {
     },
 
     /**
-     * গিটহাব থেকে ডাটা সিঙ্ক এবং ক্যাশ করা (পয়েন্ট ৮)
+     * 🌐 GitHub থেকে ডাটা লোড
+     * example:
+     * DBHandler.syncQuestions("class-7-bangla-2nd", "mcq")
      */
     async syncQuestions(subject, type) {
+
         const url = this.getFileUrl(subject, type);
+
         if (!url) {
             console.error("ইউআরএল পাওয়া যায়নি!");
             return;
@@ -94,37 +95,42 @@ const DBHandler = {
 
         try {
             console.log(`লোডিং: ${url}`);
+
             const response = await fetch(url);
             if (!response.ok) throw new Error('Network response was not ok');
-            
+
             const questions = await response.json();
+
             await this.cacheQuestions(questions);
+
             return questions;
+
         } catch (error) {
             console.error("গিটহাব থেকে ডাটা লোড করতে সমস্যা:", error);
         }
     },
 
     /**
-     * জেসন থেকে আসা প্রশ্নগুলো IndexedDB-তে সেভ করা
+     * 💾 IndexedDB-তে সেভ
      */
     cacheQuestions: async function(questionList) {
+
         if (!this.db) await this.init();
+
         const transaction = this.db.transaction(['questions'], 'readwrite');
         const store = transaction.objectStore('questions');
-        
-        // একসাথে অনেক ডাটা সেভ করার জন্য লুপ
+
         questionList.forEach(q => store.put(q));
-        
+
         return new Promise((resolve) => {
             transaction.oncomplete = () => {
-                console.log("গিটহাবের সব ডাটা লোকাল ডিবিতে সংরক্ষিত হয়েছে।");
+                console.log("ডাটা লোকাল DB-তে সেভ হয়েছে");
                 resolve();
             };
         });
-    },
+    }
 
-    // ... (অন্যান্য ফাংশন যেমন saveDraft, loadDraft আগের মতোই থাকবে)
+    // 👉 তোমার অন্যান্য ফাংশন (saveDraft, loadDraft) আগের মতোই থাকবে
 };
 
 window.DBHandler = DBHandler;
